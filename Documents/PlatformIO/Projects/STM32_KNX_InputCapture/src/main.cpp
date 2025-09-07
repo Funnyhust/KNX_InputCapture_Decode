@@ -1,12 +1,18 @@
 #include <Arduino.h>
 #include "ic_knx.h"
 #include "config.h"
+#include "knx_tx.h"
 
+// TIM_HandleTypeDef htim1;
+// DMA_HandleTypeDef hdma_tim1_ch3;
 // UART debug
 HardwareSerial DEBUG_SERIAL(PA3, PA2);
 
+
+     uint8_t on_frame[9]  = {0xBC, 0x12, 0x07, 0x00, 0x05,0xE1,0x00, 0x81, 0x33};
+     uint8_t off_frame[9] = {0xBC, 0x12, 0x07, 0x00, 0x05,0xE1,0x00, 0x80, 0x32};
 // PA9 dùng cho Input Capture (TIM1_CH2)
-KNX_IC knx(TIM1, 2, PA9, TIM2);
+//KNX_IC knx(TIM1, 2, PA9, TIM2);
 
 void knxByteHandler(uint8_t data) {
     DEBUG_SERIAL.write(data);
@@ -16,10 +22,15 @@ void knxByteHandler(uint8_t data) {
 void setup() {
     delay(2000);
     DEBUG_SERIAL.begin(19200, SERIAL_8E1); // parity even
-    knx.begin(knxByteHandler);
+  //  knx.begin(knxByteHandler);
+    knx_tx_init();
 }
 
 void loop() {
+    knx_send_frame(on_frame, 9);
+    delay(1000);
+    knx_send_frame(off_frame, 9);
+    delay(1000);
     // tất cả xử lý trong ISR
     // DEBUG_SERIAL.println("Looping");
     // delay(1000);
