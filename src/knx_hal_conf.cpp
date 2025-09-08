@@ -33,9 +33,12 @@ extern "C" void MX_TIM1_Init(void) {
 
     // === TIM1 basic init ===
     htim1.Instance = TIM1;
-    htim1.Init.Prescaler = 0;
+    htim1.Init.Prescaler = (SystemCoreClock / 1000000) - 1;
     htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim1.Init.Period = 7499;
+    //72MHz
+    //     htim1.Init.Period = 7499
+    //64MHz
+    htim1.Init.Period = 103; // 64MHz / (6666 + 1) = 9600Hz (104.166us)
     htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     htim1.Init.RepetitionCounter = 0;
     htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -45,10 +48,13 @@ extern "C" void MX_TIM1_Init(void) {
 
     // === TIM1 OC config for CH3 (PWM2) ===
     TIM_OC_InitTypeDef sConfigOC = {0};
-    sConfigOC.OCMode = TIM_OCMODE_PWM2;
-    sConfigOC.Pulse = 0;
-    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCMode = TIM_OCMODE_PWM2;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
     if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK) {
         my_Error_Handler();
     }
@@ -64,6 +70,10 @@ extern "C" void MX_TIM1_Init(void) {
     hdma_tim1_ch3.Init.Priority = DMA_PRIORITY_HIGH;
     if (HAL_DMA_Init(&hdma_tim1_ch3) != HAL_OK) {
         my_Error_Handler();
+        DEBUG_SERIAL.printf("DMA_Init_Error ");
+    }
+    else {
+        DEBUG_SERIAL.printf("DMA_Init_OK ");
     }
 
     // Link DMA handle to TIM handle (CC3)

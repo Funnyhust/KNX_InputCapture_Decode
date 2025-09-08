@@ -18,84 +18,65 @@ static uint16_t dma_buf[269];
 static int dma_len = 0;
 
 // ===== Thông số timing (72 MHz) =====
-#define BIT_PERIOD   7499   // ~104µs
-#define T0_HIGH      (7499 - 2510)  // ~69µs (xung cao cho bit 0, theo ý bạn)
+#define BIT_PERIOD   104   // ~104µs
+#define T0_HIGH      35  // ~69µs (xung cao cho bit 0, theo ý bạn)
 #define T0_TOL       700    // ~10µs dung sai (không dùng)
 
 // ===== Encode bit =====
-// static void encode_bit(uint8_t bit) {
-//     if (dma_len >= (int)(sizeof(dma_buf) / sizeof(dma_buf[0]))) return;
-//     if (bit) {
-//         dma_buf[dma_len++] = 7499;  // bit 1 => luôn Low (~104µs, đảo ngược)
-//     } else {
-//         dma_buf[dma_len++] = T0_HIGH;  // bit 0 => xung High ~69µs
-//     }
-// }
-static void encode_bit(uint8_t bit, uint32_t &t) {
-    if (dma_len >= (int)(sizeof(dma_buf)/sizeof(dma_buf[0]))) return;
+static void encode_bit(uint8_t bit) {
+    if (dma_len >= (int)(sizeof(dma_buf) / sizeof(dma_buf[0]))) return;
     if (bit) {
-        t += BIT_PERIOD;
-        dma_buf[dma_len++] = t;
+        dma_buf[dma_len++] = 0;  // bit 1 => luôn Low (~104µs, đảo ngược)
     } else {
-        t += T0_HIGH;
-        dma_buf[dma_len++] = t;
-        t += (BIT_PERIOD - T0_HIGH);
-        dma_buf[dma_len++] = t;
+        dma_buf[dma_len++] = T0_HIGH;  // bit 0 => xung High ~69µs
     }
 }
 
 // ===== Encode byte (Start + 8 data + parity + Stop) =====
-static void encode_byte(uint8_t b, uint32_t &t) {
+static void encode_byte(uint8_t b) {
     uint8_t parity_count = 0;
 
-    encode_bit(0, t); // start = 0
+    encode_bit(0); // start = 0
 
     for (int i = 0; i < 8; i++) {
         uint8_t bit = (b >> i) & 0x01;
-        encode_bit(bit, t);
+        encode_bit(bit);
         if (bit) parity_count++;
     }
 
     // parity even
-    encode_bit(parity_count & 1, t);
-    // stop = 1
-    encode_bit(1, t);
-    encode_bit(1, t);
-    encode_bit(1, t);
+   // encode_bit(parity_count & 1);
+    encode_bit(1);    // stop = 1
+    encode_bit(1);
+    encode_bit(1);
+    encode_bit(1);
 }
 // ===== Prepare frame =====
 static void prepare_frame(uint8_t *data, int len) {
     memset(dma_buf, 0, sizeof(dma_buf));
     dma_len = 0;
-    uint32_t t = 0;
     for (int i = 0; i < len; i++) {
-        encode_byte(data[i], t);
+        encode_byte(data[i]);
     }
-    // DEBUG_SERIAL.printf("Prepared frame, dma_len: %d\r\n", dma_len);
+ //    DEBUG_SERIAL.printf("Prepared frame, dma_len: %d\r\n", dma_len);
 }
 
 // ===== Public send function =====
 void knx_send_frame(uint8_t *data, int len) {
     prepare_frame(data, len);
-    for (int i = 0; i < dma_len; i++) {
-        DEBUG_SERIAL.printf("dma_buf[%d] = %d\r\n", i, dma_buf[i]);
-    }
+    // for (int i = 0; i < dma_len; i++) {
+    //    DEBUG_SERIAL.printf("dma_buf[%d] = %d\r\n", i, dma_buf[i]);
+    // }
 
-    // Đảm bảo Timer dừng trước khi khởi động
-    HAL_TIM_PWM_Stop_DMA(&htim1, TIM_CHANNEL_3);
-    delay(1); // Đợi một chút để chắc chắn Timer đã dừng
-    if (HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len) != HAL_OK) {
-      //  DEBUG_SERIAL.printf("ERROR: HAL_TIM_PWM_Start_DMA failed, State: %d\r\n", hdma_tim1_ch3.State);
-    } else {
-     //   DEBUG_SERIAL.printf("DMA started, length: %d\r\n", dma_len);
-    }
+    delay(10); // Đợi một chút để chắc chắn Timer đã dừng
+    HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
 }
 
 // ===== Callback khi DMA hoàn tất =====
 extern "C" void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM1 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
         HAL_TIM_PWM_Stop_DMA(&htim1, TIM_CHANNEL_3);
-     //   DEBUG_SERIAL.printf("PWM Finished, DMA State: %d\r\n", hdma_tim1_ch3.State);
+        //DEBUG_SERIAL.printf("PWM Finished, DMA State: %d\r\n", hdma_tim1_ch3.State);
     }
 }
 
