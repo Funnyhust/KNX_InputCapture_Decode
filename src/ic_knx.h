@@ -1,3 +1,6 @@
+#include "config.h"
+#if KNX_RX_MODE == 0
+
 #pragma once
 #include <Arduino.h>
 #include <HardwareTimer.h>
@@ -26,3 +29,4 @@ private:
     void onTick();
     void reset();
 };
+#endif

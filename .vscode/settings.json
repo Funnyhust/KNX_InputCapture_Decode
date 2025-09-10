@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "hardwaretimer.h": "c",
+        "stdint.h": "c",
+        "hardwareserial.h": "c",
+        "cstddef": "cpp",
+        "string_view": "cpp"
+    }
+}

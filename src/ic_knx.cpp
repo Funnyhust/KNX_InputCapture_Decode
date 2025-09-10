@@ -1,5 +1,7 @@
-#include "ic_knx.h"
 #include "config.h"
+#if KNX_RX_MODE ==0
+
+#include "ic_knx.h"
 
 volatile bool RX_flag = false;
 volatile uint8_t parity_count = 0;
@@ -123,3 +125,4 @@ void KNX_IC::reset() {
     RX_flag = false;
     timer_tick.pause();
 }
+#endif

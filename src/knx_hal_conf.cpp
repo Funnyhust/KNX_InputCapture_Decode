@@ -70,10 +70,10 @@ extern "C" void MX_TIM1_Init(void) {
     hdma_tim1_ch3.Init.Priority = DMA_PRIORITY_HIGH;
     if (HAL_DMA_Init(&hdma_tim1_ch3) != HAL_OK) {
         my_Error_Handler();
-        DEBUG_SERIAL.printf("DMA_Init_Error ");
+       // DEBUG_SERIAL.printf("DMA_Init_Error ");
     }
     else {
-        DEBUG_SERIAL.printf("DMA_Init_OK ");
+      //  DEBUG_SERIAL.printf("DMA_Init_OK ");
     }
 
     // Link DMA handle to TIM handle (CC3)
@@ -104,5 +104,4 @@ void my_Error_Handler(void) {
     }
 }
 #else
-
 #endif

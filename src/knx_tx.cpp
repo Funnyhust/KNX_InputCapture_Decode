@@ -42,11 +42,11 @@ static void encode_byte(uint8_t b) {
         uint8_t bit = (b >> i) & 0x01;
         encode_bit(bit);
         if (bit) parity_count++;
-    }
+    } 
 
     // parity even
-   // encode_bit(parity_count & 1);
-    encode_bit(1);    // stop = 1
+    encode_bit(parity_count & 1);
+  //  encode_bit(1);    // stop = 1
     encode_bit(1);
     encode_bit(1);
     encode_bit(1);
@@ -68,7 +68,7 @@ void knx_send_frame(uint8_t *data, int len) {
     //    DEBUG_SERIAL.printf("dma_buf[%d] = %d\r\n", i, dma_buf[i]);
     // }
 
-    delay(10); // Đợi một chút để chắc chắn Timer đã dừng
+    delay(3); // Đợi một chút để chắc chắn Timer đã dừng
     HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
 }
 
