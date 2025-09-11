@@ -7,7 +7,7 @@
 
 
 #define BIT0_MIN_US 25
-#define BIT0_MAX_US 45
+#define BIT0_MAX_US 55
 #define KNX_MAX_FRAME_LEN 23
 
 
