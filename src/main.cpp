@@ -29,40 +29,7 @@ static bool ack_received = false;
 static bool knx_is_sending = false;
 
 //Is
-static volatile bool knx_is_receved = false;
-
-
-
-// ================== QUEUE =====================
-#define MAX_QUEUE 200  // tối đa 5 frame chờ gửi
-struct Frame {
-  uint8_t data[KNX_RX_BUFFER_MAX_SIZE];
-  uint8_t len;
-};
-
-Frame queue[MAX_QUEUE];
-volatile uint8_t q_head = 0, q_tail = 0;
-volatile uint8_t q_count = 0;
-
-// Hàm thêm frame vào queue
-bool enqueue_frame(uint8_t *data, uint8_t len) {
-  if (q_count >= MAX_QUEUE) return false; // đầy
-  memcpy(queue[q_tail].data, data, len);
-  queue[q_tail].len = len;
-  q_tail = (q_tail + 1) % MAX_QUEUE;
-  q_count++;
-  return true;
-}
-
-// Hàm lấy frame ra khỏi queue
-bool dequeue_frame(Frame *f) {
-  if (q_count == 0) return false;
-  memcpy(f->data, queue[q_head].data, queue[q_head].len);
-  f->len = queue[q_head].len;
-  q_head = (q_head + 1) % MAX_QUEUE;
-  q_count--;
-  return true;
-}
+static bool knx_is_receved = false;
 
 
 uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
@@ -76,7 +43,7 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
 #if KNX_SEND_MODE //Gửi cả Frame
 static uint32_t last_byte_time = 0;
 void handle_knx_frame(const uint8_t byte) {
-  knx_is_receved = true;
+  static bool knx_is_receved = true;
   uint32_t now = millis();
 
   // Nếu quá 3ms không nhận byte mới => reset buffer
@@ -97,7 +64,6 @@ void handle_knx_frame(const uint8_t byte) {
       if (knx_rx_buf[Send_length-1]==knx_calc_checksum(knx_rx_buf,Send_length)){
         if(knx_is_sending){
           ack_received=true;
-          knx_is_sending = false;
         }
         // DEBUG_SERIAL.println("Checksum Valid");
       }
@@ -107,7 +73,7 @@ void handle_knx_frame(const uint8_t byte) {
       // DEBUG_SERIAL.write(knx_rx_buf,Send_length);
       // }
       Rx_flag = true;
-      knx_is_receved = false;
+      static bool knx_is_receved = false;
 
     }
   }
@@ -124,6 +90,7 @@ void handle_knx_frame(const uint8_t byte) {
 void setup() {
    DEBUG_SERIAL.begin(115200, SERIAL_8E1); // parity even
    IWatchdog.begin(500000); 
+
    knx_rx_init(handle_knx_frame);
    knx_tx_init();
 }
@@ -191,19 +158,14 @@ bool knx_send_with_retry(uint8_t *frame, uint8_t len) {
 // Loop-----------------------------------------------------------------
 void loop() {
    // knx_send_frame(on_frame, 9);   
-// Nhận frame từ UART → bỏ vào queue
   if (read_uart_frame()) {
-    enqueue_frame(uart_rx_buf, Uart_length);
+    //Co retry
+    knx_send_with_retry(uart_rx_buf,Uart_length);  // Gửi ra KNX bus
+    //Khong retry
+    //knx_send_frame(uart_rx_buf, Uart_length); // Gửi bản tin
+    // memset((void*)uart_rx_buf, 0, sizeof(uart_rx_buf));
     Uart_length = 0;
-  }
-
-  // Nếu KNX đang rảnh → lấy frame từ queue ra gửi
-  if (!knx_is_sending && q_count > 0) {
-    Frame f;
-    if (dequeue_frame(&f)) {
-      knx_send_frame(f.data, f.len);
     }
-  }
 
 #if KNX_SEND_MODE
   if(Rx_flag) {
