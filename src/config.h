@@ -27,6 +27,8 @@ extern HardwareSerial DEBUG_SERIAL;
 #include "knx_rx.h"
 #include <IWatchdog.h>
 
+
+
 #define KNX_RX_BUFFER_MAX_SIZE 23
 static uint8_t uart_rx_buf[KNX_RX_BUFFER_MAX_SIZE];
 

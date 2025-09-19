@@ -756,7 +756,12 @@ void loop() {
 uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x22};
 uint8_t FB_Frame[9]={0xBC, 0x00, 0x55, 0x33,0xAA, 0xE1, 0x00, 0x80, 0xEE};
 
+
+
+
+
 //UART
+HardwareSerial Serial3(USART3);
 HardwareSerial DEBUG_SERIAL(USART2);
 static uint8_t Uart_length = 0;
 static uint8_t uart_rx_buf[KNX_BUFFER_MAX_SIZE];
@@ -796,10 +801,11 @@ bool read_uart_frame() {
 }
 //===============================================
 
+//KNX-TX
+  static uint32_t backoff_time = 0;
+  static bool waiting_backoff = false; 
 
-
-
-//KNX========================================================================================================================================
+//KNX-RX ========================================================================================================================================
 static uint8_t knx_rx_buf[KNX_BUFFER_MAX_SIZE];
 static volatile bool knx_rx_flag=false;
 static volatile bool knx_is_receved = false;
@@ -813,7 +819,7 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
     cs ^= data[i];
   }
   return ~cs;
-}
+} 
 //============================================
 
 
@@ -821,6 +827,8 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
 #if KNX_RX_MODE //Gửi cả Frame
 static uint32_t last_byte_time = 0;
 void handle_knx_frame(const uint8_t byte) {
+ // Serial3.printf("Co goi call Back\r\n");
+  Serial3.printf("a\r\n");
   knx_is_receved = true;
   uint32_t now = millis();
   // Nếu quá 3ms không nhận byte mới => reset buffer
@@ -840,9 +848,14 @@ void handle_knx_frame(const uint8_t byte) {
     if (byte_idx == knx_rx_length) {
       if (knx_rx_buf[knx_rx_length-1]==knx_calc_checksum(knx_rx_buf,knx_rx_length)){
       knx_rx_flag = true;
-      static bool knx_is_receved = false;
-
+      knx_is_receved = false;
+      Serial3.printf("2\r\n");
     }
+      else  
+      { 
+      DEBUG_SERIAL.println("Checksum Invalid");
+      DEBUG_SERIAL.write(knx_rx_buf,knx_rx_length);
+  }
   }
   }
   }
@@ -901,32 +914,25 @@ void test_busy_bus(){
 
 void setup() {
    DEBUG_SERIAL.begin(19200, SERIAL_8E1); // parity even
+   Serial3.begin(19200,SERIAL_8E1);
    IWatchdog.begin(500000); 
    knx_rx_init(handle_knx_frame);
    knx_tx_init();
+   Serial3.printf("Start\r\n");
 }
 
-
+uint32_t last_send=0;
 // Loop-----------------------------------------------------------------
 void loop() {
-
-
-  // DEBUG_SERIAL.write(FB_Frame, 9);
-  //   byte_idx = 0;
-  // }
-
-
-  //Nếu nhận đủ frame thì truyền UART lên bridge
   #if KNX_RX_MODE
   if(knx_rx_flag) {
+    Serial3.printf("1\r\n");
     knx_rx_flag = false;
-    //TEST
-    //DEBUG_SERIAL.write(0xAA);
-    //KNX_Received_Data
+    last_send = millis();
     DEBUG_SERIAL.write(knx_rx_buf, knx_rx_length);
-    memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
-    byte_idx = 0;
-
+  }
+  if(millis()-last_send>2){
+    knx_is_receved = false;
   }
 #else
   if(knx_rx_flag) {
@@ -939,13 +945,30 @@ void loop() {
     enqueue_frame(uart_rx_buf, Uart_length);
     Uart_length = 0;
   }
-
   // Nếu KNX đang rảnh → lấy frame từ queue ra gửi
-  if (!knx_is_receved && q_count > 0) {
-    Frame f;
-      knx_send_frame(f.data, f.len);
+
+
+if (q_count > 0) {
+  if (!knx_is_receved) {
+    if (!waiting_backoff) {
+      // Bắt đầu backoff ngẫu nhiên
+      backoff_time = millis() + random(2, 10); // 2-10ms
+      waiting_backoff = true;
     }
-  //Reload watchdog timer
+    else if (millis() >= backoff_time) {
+      // Backoff xong, gửi frame
+      Frame f;
+      if (dequeue_frame(&f)) {
+        knx_send_frame(f.data, f.len);
+      }
+      waiting_backoff = false;
+    }
+  } else {
+    // Nếu bus bận trong lúc chờ → reset backoff
+    waiting_backoff = false;
+  }
+  }
+    //Reload watchdog timer
   IWatchdog.reload();
 }
 #endif
