@@ -51,12 +51,19 @@ void knx_rx_init(knx_frame_callback_t cb) {
 void knx_exti_irq(void) {
   if(!RX_flag){
     //Reset timer về 0
+      Serial3.write(0x00);
       RX_flag = true;
       timer.refresh();
       timer.resume(); // Bật lại timer để bắt đầu nhận dữ liệu
   }
+    //  Serial3.write(0x23);
   static uint8_t last = 0;
-  uint8_t lvl = digitalRead(KNX_TX_PIN); // dùng chân D2 làm KNX_RX
+  // digitalRead
+  //uint8_t lvl = digitalRead(KNX_TX_PIN); // dùng chân D2 làm KNX_RX
+
+  // thanh ghi mức cao/thấp
+// Đọc mức logic tại PA9
+  uint8_t lvl = (GPIOA->IDR & (1 << 9)) ? 1 : 0;
   //bước 1: Nếu là sườn lên -> lưu lại time điểm này bằng bộ đếm timer
   //Bước 2: sườn xuống -> tính khoảng thời gian từ lúc sườn lên đến sườn xuống và kiểm tra khoảng time thỏa mãn ko? Nếu có thì bit 0/1
   //bước 3: 
@@ -152,8 +159,8 @@ void knx_timer_tick(void) {
     cur_byte = 0;
     bit_idx = 0;
     byte_idx++;
-    timer.pause();
     RX_flag = false;
+    timer.pause();
   }
 }
 #endif
