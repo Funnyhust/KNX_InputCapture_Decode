@@ -7,11 +7,11 @@
 #include "knx_rx.h"
 #include <IWatchdog.h>
 
- uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x99};
- uint8_t FB_Frame[9]={0xBC, 0x00, 0x55, 0x33,0xAA, 0xE1, 0x00, 0x80, 0xEE};
+//  uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x99};
+//  uint8_t FB_Frame[9]={0xBC, 0x00, 0x55, 0x33,0xAA, 0xE1, 0x00, 0x80, 0xEE};
 
- uint8_t onFrame[9]={0xBC, 0x11, 0x01, 0x00,0x04, 0xE1, 0x00, 0x80, 0x36};
-uint8_t offFrame[9]={0xBC, 0x11, 0x01, 0x00,0x04, 0xE1, 0x00, 0x81, 0x37};
+//  uint8_t onFrame[9]={0xBC, 0x11, 0x01, 0x00,0x04, 0xE1, 0x00, 0x80, 0x36};
+// uint8_t offFrame[9]={0xBC, 0x11, 0x01, 0x00,0x04, 0xE1, 0x00, 0x81, 0x37};
 
 #define KNX_RX_BUFFER_MAX_SIZE 23
 static uint8_t uart_rx_buf[KNX_RX_BUFFER_MAX_SIZE];
@@ -81,13 +81,14 @@ void handle_knx_frame(const uint8_t byte) {
         if(knx_is_sending){
           ack_received=true;
         }
-        // DEBUG_SERIAL.println("Checksum Valid");
+       //  Serial3.println("Checksum Valid");
       }
-      // else  
-      // { 
-      // DEBUG_SERIAL.println("Checksum Invalid");
-      // DEBUG_SERIAL.write(knx_rx_buf,Send_length);
-      // }
+      else  
+      { 
+      Serial3.println("Checksum Invalid");
+      Serial3.write(0xA5);
+      Serial3.write(knx_rx_buf,Send_length);
+      }
       Rx_flag = true;
       static bool knx_is_receved = false;
 
@@ -203,7 +204,7 @@ void loop() {
     // Serial3.printf("KNX->UART: ");
     // Serial3.println(idx2);
     // idx2++;
-    DEBUG_SERIAL.write(knx_rx_buf, Send_length);
+    //DEBUG_SERIAL.write(knx_rx_buf, Send_length);
   }
 #else
   if(Rx_flag) {
@@ -355,8 +356,10 @@ void handle_knx_frame(const uint8_t byte) {
     }
       else  
       { 
-     // DEBUG_SERIAL.write(knx_rx_buf,knx_rx_length);
-  }
+      Serial3.println("Checksum Invalid");
+      Serial3.write(0xA5);
+      Serial3.write(knx_rx_buf,knx_rx_length);
+      }
   }
   }
   }

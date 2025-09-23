@@ -51,12 +51,11 @@ void knx_rx_init(knx_frame_callback_t cb) {
 void knx_exti_irq(void) {
   if(!RX_flag){
     //Reset timer về 0
-      Serial3.write(0x00);
+     // Serial3.write(0x00);
       RX_flag = true;
       timer.refresh();
       timer.resume(); // Bật lại timer để bắt đầu nhận dữ liệu
   }
-    //  Serial3.write(0x23);
   static uint8_t last = 0;
   // digitalRead
   //uint8_t lvl = digitalRead(KNX_TX_PIN); // dùng chân D2 làm KNX_RX
