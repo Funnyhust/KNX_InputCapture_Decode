@@ -225,7 +225,7 @@ void loop() {
 //          last_send= now;
 //    }
 //   }
-//   IWatchdog.reload();
+//   IWatchdog.reload();s
 // }
 
 #else
@@ -239,13 +239,16 @@ void loop() {
 
 #define KNX_BUFFER_MAX_SIZE 23
 
-// uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x22};
+uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x22};
 // uint8_t FB_Frame[9]={0xBC, 0x00, 0x55, 0x33,0xAA, 0xE1, 0x00, 0x80, 0xEE};
 
 
 void MX_NVIC_Init(void)
 {
     // Ưu tiên cao hơn cho Timer (để KNX đọc không bị block)
+  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  // Ưu tiên cao nhất cho EXTI (để KNX đọc không bị block)
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
@@ -261,7 +264,7 @@ void MX_NVIC_Init(void)
 static uint32_t seed = 1;
 uint8_t random_2_to_10(void) {
     seed = seed * 1664525UL + 1013904223UL;   // LCG
-    return (seed % 9) + 2;  // [2..10]
+    return (seed % 9) + 8;  // [2..10]
 }
 
 
@@ -328,15 +331,15 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
 //============================================
 
 
-
 #if KNX_RX_MODE //Gửi cả Frame
 static uint32_t last_byte_time = 0;
 void handle_knx_frame(const uint8_t byte) {
- // Serial3.printf("Co goi call Back\r\n");
+
   knx_is_receved = true;
-  uint32_t now = millis();
-  // Nếu quá 3ms không nhận byte mới => reset buffer
-  if ((now - last_byte_time) > 2) {
+  uint32_t now = micros();
+  //Serial3.print(now);
+  // Nếu quá 1400us không nhận byte mới => reset buffer
+  if ((now - last_byte_time) > 1450) {
     knx_rx_length =0;
     memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
     byte_idx = 0;
@@ -362,6 +365,7 @@ void handle_knx_frame(const uint8_t byte) {
       }
   }
   }
+   // Serial3.println(micros());
   }
 #else // Gửi Byte
 static uint8_t Rx_byte=0;
@@ -419,24 +423,22 @@ bool dequeue_frame(Frame *f) {
 void setup() {
    DEBUG_SERIAL.begin(19200, SERIAL_8E1); // parity even
    Serial3.begin(19200,SERIAL_8E1);
-   IWatchdog.begin(500000); 
+   IWatchdog.begin(500000);
    knx_rx_init(handle_knx_frame);
    knx_tx_init();
    MX_NVIC_Init();
    Serial3.printf("Start\r\n");
 }
 
-uint32_t last_send=0;
 // Loop-----------------------------------------------------------------
 void loop() {
   #if KNX_RX_MODE
   if(knx_rx_flag) {
     knx_rx_flag = false;
-    last_send = millis();
     //Serial3.printf("Serial OK after KNX receiver\r\n");
     DEBUG_SERIAL.write(knx_rx_buf, knx_rx_length);
   }
-  if(millis()-last_send>2){
+  if(micros()-last_byte_time>1500){
     knx_is_receved = false;
   }
 #else
@@ -465,6 +467,10 @@ if (q_count > 0) {
       // Backoff xong, gửi frame
       Frame f;
       if (dequeue_frame(&f)) {
+        for(int i=0; i<f.len; i++){
+          Serial3.printf("%02X ", f.data[i]);
+        }
+        Serial3.println(); 
         knx_send_frame(f.data, f.len);
       }
       waiting_backoff = false;
@@ -477,4 +483,56 @@ if (q_count > 0) {
     //Reload watchdog timer
   IWatchdog.reload();
 }
+
+
+// void loop() {
+//   #if KNX_RX_MODE
+//   if(knx_rx_flag) {
+//     knx_rx_flag = false;
+//     //Serial3.printf("Serial OK after KNX receiver\r\n");
+//     DEBUG_SERIAL.write(knx_rx_buf, knx_rx_length);
+//   }
+//   if(micros()-last_byte_time>1500){
+//     knx_is_receved = false;
+//   }
+// #else
+//   if(knx_rx_flag) {
+//     knx_rx_flag = false;
+//     DEBUG_SERIAL.write(Rx_byte); // Gửi byte nhận được qua Serial để kiểm tra
+//   }
+// #endif
+//   // Nhận frame từ UART → bỏ vào queue
+//   if (read_uart_frame()) {
+//     //Serial3.printf("Serial OK after UART receiver\r\n");
+//     enqueue_frame(uart_rx_buf, Uart_length);
+//     Uart_length = 0;
+//   }
+//   // Nếu KNX đang rảnh → lấy frame từ queue ra gửi
+//   for(int i=0; i<10;i++){
+//   if (!knx_is_receved) {
+//     if (!waiting_backoff) {
+//       // Bắt đầu backoff ngẫu nhiên
+//       backoff_time = millis() + random_2_to_10();// 2-10ms
+//       waiting_backoff = true; 
+//     }
+//     else if (millis() >= backoff_time) {
+//       // Backoff xong, gửi frame
+//         knx_send_frame(testFrame, 9);
+//       waiting_backoff = false;
+//     }
+//   } else {
+//     // Nếu bus bận trong lúc chờ → reset backoff
+//     waiting_backoff = false;
+//   }
+//   }
+//     //Reload watchdog timer
+//   delay(300);
+//   IWatchdog.reload();
+// }
+
 #endif
+
+
+
+
+

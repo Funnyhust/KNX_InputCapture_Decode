@@ -24,6 +24,8 @@ void knx_exti_irq(void);
 // Hàm gọi trong Timer IRQ 104µs (bit sampling)
 void knx_timer_tick(void);
 
+bool get_knx_rx_flag();
+
 
 #endif // STKNX_DRIVER_H
 #endif

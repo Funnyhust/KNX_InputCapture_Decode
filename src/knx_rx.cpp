@@ -19,11 +19,16 @@ static uint8_t pulse_start = 0;
 static knx_frame_callback_t callback_fn = nullptr;
 static volatile uint8_t parity_bit = 0;
 static volatile uint8_t received_frame[KNX_MAX_FRAME_LEN];
+static volatile uint32_t last_rx_time = 0;
 
 
 static volatile bool RX_flag=false;
 static uint8_t total = 0;
 
+bool get_knx_rx_flag(){
+  // Nếu lần thời gian nhận tín hiệu gần đây < 2ms thì trả về true, tức là BUS bận, còn không thì là bus rảnh
+  return (millis()-last_rx_time)<4;
+}
 
 static uint8_t knx_checksum(uint8_t *data, size_t len) {
     uint8_t sum = 0;
@@ -49,6 +54,7 @@ void knx_rx_init(knx_frame_callback_t cb) {
 
 
 void knx_exti_irq(void) {
+  //last_rx_time = millis();
   if(!RX_flag){
     //Reset timer về 0
      // Serial3.write(0x00);
@@ -104,7 +110,7 @@ void knx_timer_tick(void) {
       parity_bit++;
     }
   } 
-    else if (bit_idx == 10) {
+.    else if (bit_idx == 10) {
     if ((parity_bit & 1) == bit) {
       return;
     }
