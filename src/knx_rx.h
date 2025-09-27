@@ -10,11 +10,7 @@
 
 #define KNX_TX_PIN PA9
 
-#if KNX_SEND_UART_MODE
-typedef void (*knx_frame_callback_t)(const uint8_t *data, uint8_t length);
-#else
 typedef void (*knx_frame_callback_t)(const uint8_t byte);
-#endif
 
      
 // Khởi tạo: truyền vào callback xử lý telegram

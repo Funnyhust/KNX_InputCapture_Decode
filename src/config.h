@@ -5,18 +5,47 @@
 
 // Khai báo serial debug dùng chung
 extern HardwareSerial DEBUG_SERIAL;
-extern HardwareSerial Serial3;
+extern HardwareSerial HC_SERIAL;
+
+// KNX Configuration - Cải thiện với constants rõ ràng
 #define KNX_TX_MODE 1 // 1: PWM, 0: OC
 #define KNX_RX_MODE 1 // 1: EXTI + Timer, 0: Input Capture + Timer
-#define KNX_SEND_UART_MODE 0 // Gửi cả Frame, 0: Gửi từng byte
 
-#define KNX_RX_MODE 1   //1 Gửi cả, 0 gửi byte
+// Timing constants (microseconds)
+#define KNX_BIT_PERIOD_US 104
+#define KNX_BIT0_MIN_US 25
+#define KNX_BIT0_MAX_US 55
+#define KNX_FRAME_TIMEOUT_US 1500
+#define KNX_BUS_BUSY_TIMEOUT_MS 4
 
-#define CODE_STATE 0 // 1-Old, 0 New
-// bool knx_sending=false;
-// bool ack_received = false;
-// void knx_ack_callback() {
-//   ack_received = true;  // Gọi khi nhận được ACK từ bus
-// }
+// Buffer sizes
+#define KNX_BUFFER_MAX_SIZE 23
+#define KNX_MAX_QUEUE_SIZE 50
+#define KNX_MAX_FRAME_LEN 23
+
+// UART Configuration
+#define UART_BAUD_RATE 19200
+#define UART_TIMEOUT_MS 100
+
+// Watchdog Configuration
+#define WATCHDOG_TIMEOUT_US 500000
+
+// Error Recovery
+#define MAX_ERROR_RETRY_COUNT 5
+#define RECOVERY_TIMEOUT_MS 10
+
+// Logger Configuration
+#define LOGGER_DEFAULT_LEVEL LOG_LEVEL_INFO
+#define LOGGER_ENABLE_TIMESTAMP 1
+#define LOGGER_ENABLE_CATEGORY 1
+#define LOGGER_ENABLE_LEVEL 1
+#define LOGGER_ENABLE_COLOR 1
+#define LOGGER_MAX_LOGS_PER_SECOND 100
+
+// Legacy Debug Configuration (deprecated - use logger instead)
+#define ENABLE_DEBUG_PRINTS 1
+#define ENABLE_ERROR_LOGGING 1
+
+
 #endif
 

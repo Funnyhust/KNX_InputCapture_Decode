@@ -59,12 +59,54 @@ static void prepare_frame(uint8_t *data, int len) {
  //    DEBUG_SERIAL.printf("Prepared frame, dma_len: %d\r\n", dma_len);
 }
 
-// ===== Public send function =====
-void knx_send_frame(uint8_t *data, int len) {
+// ===== Public send function với error handling =====
+knx_error_t knx_send_frame(uint8_t *data, int len) {
+    // Input validation
+    if (data == nullptr) {
+        DEBUG_SERIAL.println("KNX TX: Invalid data pointer");
+        return KNX_ERROR_INVALID_PARAM;
+    }
+    
+    if (len <= 0 || len > KNX_BUFFER_MAX_SIZE) {
+        DEBUG_SERIAL.printf("KNX TX: Invalid length %d\n", len);
+        return KNX_ERROR_INVALID_LENGTH;
+    }
+    
+    // Kiểm tra DMA state
+    if (hdma_tim1_ch3.State != HAL_DMA_STATE_READY) {
+        DEBUG_SERIAL.println("KNX TX: DMA busy");
+        return KNX_ERROR_BUS_BUSY;
+    }
+    
+    // Final bus collision check - đọc trực tiếp GPIO
+    uint8_t bus_level = (GPIOA->IDR & (1 << 9)) ? 1 : 0;
+    if (bus_level == 0) {
+        DEBUG_SERIAL.println("KNX TX: Bus collision detected - aborting");
+        return KNX_ERROR_BUS_BUSY;
+    }
+    
     prepare_frame(data, len);
-    // Ban đầu có delay(3); dễ lỗi
-    //delay(3); // Đợi một chút để chắc chắn Timer đã dừng
-    HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
+    
+    // Đợi Timer dừng hoàn toàn
+    uint32_t timeout = millis() + 10; // 10ms timeout
+    while (htim1.State != HAL_TIM_STATE_READY && millis() < timeout) {
+        delay(1);
+    }
+    
+    if (htim1.State != HAL_TIM_STATE_READY) {
+        DEBUG_SERIAL.println("KNX TX: Timer not ready");
+        return KNX_ERROR_BUS_BUSY;
+    }
+    
+    // Start DMA transmission
+    HAL_StatusTypeDef status = HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
+    
+    if (status != HAL_OK) {
+        DEBUG_SERIAL.printf("KNX TX: DMA start failed %d\n", status);
+        return KNX_ERROR_BUS_BUSY;
+    }
+    
+    return KNX_OK;
 }
 
 // ===== Callback khi DMA hoàn tất =====

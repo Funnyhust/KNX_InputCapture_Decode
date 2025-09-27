@@ -97,10 +97,49 @@ extern "C" void DMA1_Channel6_IRQHandler(void) {
     HAL_DMA_IRQHandler(&hdma_tim1_ch3);
 }
 
-// Custom error handler to avoid conflict with macro
+// Custom error handler với recovery mechanism
+static uint32_t error_count = 0;
+static uint32_t last_error_time = 0;
+
 void my_Error_Handler(void) {
-    while (1) {
-        // Placeholder for error indication
+    error_count++;
+    last_error_time = millis();
+    
+    // Log error
+    DEBUG_SERIAL.printf("Error #%lu at %lu ms\n", error_count, last_error_time);
+    
+    // Recovery mechanism - reset peripherals
+    if (error_count < 5) { // Giới hạn số lần retry
+        DEBUG_SERIAL.println("Attempting recovery...");
+        
+        // Reset DMA
+        HAL_DMA_DeInit(&hdma_tim1_ch3);
+        HAL_DMA_Init(&hdma_tim1_ch3);
+        
+        // Reset Timer
+        HAL_TIM_PWM_DeInit(&htim1);
+        HAL_TIM_PWM_Init(&htim1);
+        
+        // Reconfigure channel
+        TIM_OC_InitTypeDef sConfigOC = {0};
+        sConfigOC.OCMode = TIM_OCMODE_PWM2;
+        sConfigOC.Pulse = 0;
+        sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+        sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+        sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+        sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+        sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+        HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3);
+        
+        DEBUG_SERIAL.println("Recovery completed");
+    } else {
+        // Quá nhiều lỗi, chuyển sang safe mode
+        DEBUG_SERIAL.println("Too many errors - entering safe mode");
+        while (1) {
+            // Blink LED hoặc gửi error code
+            delay(1000);
+            DEBUG_SERIAL.println("SAFE MODE");
+        }
     }
 }
 #else

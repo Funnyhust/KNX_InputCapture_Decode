@@ -1,45 +1,35 @@
 
 #include <Arduino.h>
-//#include "ic_knx.h"
 #include "config.h"
 #include "knx_tx.h"
 #include "knx_rx.h"
+#include "atomic_utils.h"
+#include "system_utils.h"
+#include "frame_validator.h"
+#include "logger.h"
 #include <IWatchdog.h>
 
 #define KNX_BUFFER_MAX_SIZE 23
 
-uint8_t testFrame[9]={0xBC, 0xAA, 0x55, 0x55,0xAA, 0xE1, 0x00, 0x80, 0x22};
-// uint8_t FB_Frame[9]={0xBC, 0x00, 0x55, 0x33,0xAA, 0xE1, 0x00, 0x80, 0xEE};
+// Forward declarations
+uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 
 
-void MX_NVIC_Init(void)
-{
-    // Ưu tiên cao hơn cho Timer (để KNX đọc không bị block)
-  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM2_IRQn);
-  // Ưu tiên cao nhất cho EXTI (để KNX đọc không bị block)
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-  // Ưu tiên trung bình cho USART1
-  HAL_NVIC_SetPriority(USART2_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(USART2_IRQn);
 
-  // Ưu tiên thấp nhất cho USART2
-  HAL_NVIC_SetPriority(USART3_IRQn, 2, 0);
-  HAL_NVIC_EnableIRQ(USART3_IRQn);
-}
-
-static uint32_t seed = 1;
+// Cải thiện random function để tránh integer overflow
+static uint64_t seed = 1;
 uint8_t random_2_to_10(void) {
-    seed = seed * 1664525UL + 1013904223UL;   // LCG
-    return (seed % 9) + 8;  // [2..10]
+    // Sử dụng uint64_t để tránh overflow
+    seed = (seed * 1664525ULL + 1013904223ULL) & 0xFFFFFFFFULL;
+    return (seed % 9) + 2;  // [2..10] - sửa lỗi logic
 }
 
 
 //UART
-HardwareSerial Serial3(USART3);
-HardwareSerial DEBUG_SERIAL(USART2);
+HardwareSerial DEBUG_SERIAL(USART3);
+HardwareSerial HC_SERIAL(USART2);
+
 static uint8_t Uart_length = 0;
 static uint8_t uart_rx_buf[KNX_BUFFER_MAX_SIZE];
 
@@ -47,47 +37,105 @@ static uint8_t uart_rx_buf[KNX_BUFFER_MAX_SIZE];
 bool read_uart_frame() {
   static uint8_t index = 0;
   static uint8_t total = 0;
-  while (DEBUG_SERIAL.available()) {
-    uint8_t byte = DEBUG_SERIAL.read();
-    if (index < KNX_BUFFER_MAX_SIZE) {
-      uart_rx_buf[index++] = byte;
-    } else {
-      // Tràn buffer, reset lại
+  static uint32_t last_byte_time = 0;
+  const uint32_t TIMEOUT_MS = 100; // Timeout 100ms
+  
+  while (HC_SERIAL.available()) {
+    uint8_t byte = HC_SERIAL.read();
+    last_byte_time = millis();
+    
+    // Bounds checking nghiêm ngặt
+    if (index >= KNX_BUFFER_MAX_SIZE - 1) {
+      // Buffer sắp đầy, reset an toàn
+      LOG_ERROR(LOG_CAT_UART, "UART Buffer overflow - resetting");
       index = 0;
       total = 0;
+      memset(uart_rx_buf, 0, sizeof(uart_rx_buf));
       return false;
     }
-    if (index >= 6&& total==0) {
-      total = 6 + (uart_rx_buf[5] & 0x0F) + 1 + 1;
-      Uart_length = total;
-      if (total > KNX_BUFFER_MAX_SIZE) {
+    
+    uart_rx_buf[index++] = byte;
+    
+    // Kiểm tra độ dài frame khi có đủ 6 byte
+    if (index >= 6 && total == 0) {
+      uint8_t data_length = uart_rx_buf[5] & 0x0F;
+      total = 6 + data_length + 1 + 1; // header + data + checksum
+      
+      // Validation độ dài frame
+      if (total > KNX_BUFFER_MAX_SIZE || data_length > 15) {
+        LOG_ERROR(LOG_CAT_UART, "Invalid frame length: %d", total);
         index = 0;
         total = 0;
+        memset(uart_rx_buf, 0, sizeof(uart_rx_buf));
+        return false;
+      }
+      Uart_length = total;
+    }
+    
+    // Frame hoàn chỉnh
+    if (total > 0 && index >= total) {
+      // Comprehensive frame validation
+      frame_validation_result_t validation = validate_knx_frame(uart_rx_buf, total);
+      if (validation == FRAME_VALID) {
+        index = 0;
+        total = 0;
+        return true;
+      } else {
+        LOG_ERROR(LOG_CAT_VALIDATION, "UART Frame validation failed: %s", 
+                 frame_validation_error_to_string(validation));
+        LOG_HEX_DEBUG(LOG_CAT_UART, "Invalid UART frame", uart_rx_buf, total);
+        
+        index = 0;
+        total = 0;
+        memset(uart_rx_buf, 0, sizeof(uart_rx_buf));
         return false;
       }
     }
-    if (total > 0 && index >= total) {
-      // Có thể kiểm tra checksum ở đây nếu muốn
-      //DEBUG_SERIAL.write(uart_rx_buf,Uart_length);
-      index = 0;
-      total = 0;
-      return true;
-    }
   }
+  
+  // Timeout check
+  if (index > 0 && (millis() - last_byte_time) > TIMEOUT_MS) {
+    LOG_ERROR(LOG_CAT_UART, "UART Frame timeout - resetting");
+    index = 0;
+    total = 0;
+    memset(uart_rx_buf, 0, sizeof(uart_rx_buf));
+  }
+  
   return false;
 }
 //===============================================
 
-//KNX-TX
+//KNX-TX với Echo ACK mechanism
   static uint32_t backoff_time = 0;
-  static bool waiting_backoff = false; 
+  static bool waiting_backoff = false;
+  
+  // Frame tracking cho echo ACK
+  struct PendingFrame {
+    uint8_t data[KNX_BUFFER_MAX_SIZE];
+    uint8_t len;
+    uint32_t send_time;
+    uint8_t retry_count;
+    bool waiting_ack;
+  };
+  
+  static PendingFrame pending_frame;
+  static bool has_pending_frame = false; 
 
 //KNX-RX ========================================================================================================================================
 static uint8_t knx_rx_buf[KNX_BUFFER_MAX_SIZE];
 static volatile bool knx_rx_flag=false;
 static volatile bool knx_is_receved = false;
 static volatile uint8_t knx_rx_length = 0;
-static volatile uint8_t byte_idx=0;
+static volatile uint8_t byte_idx = 0;
+
+// Thread-safe access functions
+bool get_knx_rx_flag_safe(void) {
+    return ATOMIC_READ(knx_rx_flag);
+}
+
+void set_knx_rx_flag_safe(bool value) {
+    ATOMIC_WRITE(knx_rx_flag, value);
+}
 
 //===============CheckSum=================
 uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
@@ -97,45 +145,107 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len) {
   }
   return ~cs;
 } 
+
+//===============Frame Comparison=================
+bool compare_frames(const uint8_t *frame1, uint8_t len1, const uint8_t *frame2, uint8_t len2) {
+  if (len1 != len2) return false;
+  
+  for (uint8_t i = 0; i < len1; i++) {
+    if (frame1[i] != frame2[i]) return false;
+  }
+  return true;
+}
+
+//===============Echo ACK Handler=================
+void handle_echo_ack(const uint8_t *rx_frame, uint8_t rx_len) {
+  if (!has_pending_frame || !pending_frame.waiting_ack) {
+    return; // Không có frame đang chờ ACK
+  }
+  
+  // So sánh frame nhận được với frame đã gửi
+  if (compare_frames(pending_frame.data, pending_frame.len, rx_frame, rx_len)) {
+    // Echo ACK thành công!
+    LOG_INFO(LOG_CAT_ECHO_ACK, "Echo ACK received - transmission successful");
+    LOG_HEX_DEBUG(LOG_CAT_ECHO_ACK, "Echo ACK frame", rx_frame, rx_len);
+    has_pending_frame = false;
+    pending_frame.waiting_ack = false;
+  }
+}
 //============================================
 
 
 #if KNX_RX_MODE //Gửi cả Frame
 static uint32_t last_byte_time = 0;
 void handle_knx_frame(const uint8_t byte) {
-
-  knx_is_receved = true;
   uint32_t now = micros();
-  //Serial3.print(now);
-  // Nếu quá 1400us không nhận byte mới => reset buffer
-  if ((now - last_byte_time) > 1450) {
-    knx_rx_length =0;
+  
+  // Timeout check với atomic access
+  if ((now - last_byte_time) > KNX_FRAME_TIMEOUT_US) {
+    ATOMIC_BLOCK_START();
+    knx_rx_length = 0;
     memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
     byte_idx = 0;
+    ATOMIC_BLOCK_END();
   }
   last_byte_time = now;
 
-  // Lưu byte
+  // Bounds checking an toàn
+  if (byte_idx >= KNX_BUFFER_MAX_SIZE - 1) {
+    // LOG_ERROR(LOG_CAT_KNX_RX, "KNX RX buffer overflow - resetting");
+    ATOMIC_BLOCK_START();
+    knx_rx_length = 0;
+    memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
+    byte_idx = 0;
+    ATOMIC_BLOCK_END();
+    return;
+  }
+
+  // Lưu byte an toàn
+  ATOMIC_BLOCK_START();
   knx_rx_buf[byte_idx++] = byte;
+  ATOMIC_BLOCK_END();
 
   // Tính độ dài frame khi đã có ít nhất 6 byte
   if (byte_idx >= 6) {
-    knx_rx_length = 6 + (knx_rx_buf[5] & 0x0F) + 1 + 1;
-    if (byte_idx == knx_rx_length) {
-      if (knx_rx_buf[knx_rx_length-1]==knx_calc_checksum(knx_rx_buf,knx_rx_length)){
-      knx_rx_flag = true;
-      knx_is_receved = false;
+    uint8_t data_length = knx_rx_buf[5] & 0x0F;
+    uint8_t calculated_length = 6 + data_length + 1 + 1;
+    
+    // Validation độ dài frame
+    if (calculated_length > KNX_BUFFER_MAX_SIZE || data_length > 15) {
+      // LOG_ERROR(LOG_CAT_KNX_RX, "Invalid KNX frame length: %d", calculated_length);
+      ATOMIC_BLOCK_START();
+      knx_rx_length = 0;
+      memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
+      byte_idx = 0;
+      ATOMIC_BLOCK_END();
+      return;
     }
-      else  
-      { 
-      Serial3.println("Checksum Invalid");
-      Serial3.write(0xA5);
-      Serial3.write(knx_rx_buf,knx_rx_length);
+    
+    knx_rx_length = calculated_length;
+    
+    if (byte_idx == knx_rx_length) {
+      // Comprehensive frame validation
+      frame_validation_result_t validation = validate_knx_frame(knx_rx_buf, knx_rx_length);
+      if (validation == FRAME_VALID) {
+        // Check if this is an echo ACK của frame đã gửi
+        handle_echo_ack(knx_rx_buf, knx_rx_length);
+        
+        set_knx_rx_flag_safe(true);
+      } else {
+        // LOG_ERROR(LOG_CAT_VALIDATION, "KNX Frame validation failed: %s", 
+        //          frame_validation_error_to_string(validation));
+        // LOG_HEX_DEBUG(LOG_CAT_KNX_RX, "Invalid KNX frame", knx_rx_buf, knx_rx_length);
+      
+        // Reset buffer sau khi báo lỗi
+        ATOMIC_BLOCK_START();
+        knx_rx_length = 0;
+        memset((void*)knx_rx_buf, 0, sizeof(knx_rx_buf));
+        byte_idx = 0;
+        ATOMIC_BLOCK_END();
       }
+    }
   }
-  }
-   // Serial3.println(micros());
-  }
+}
 #else // Gửi Byte
 static uint8_t Rx_byte=0;
 static uint32_t last_byte_time = 0;
@@ -163,11 +273,38 @@ Frame queue[MAX_QUEUE];
 volatile uint8_t q_head = 0, q_tail = 0;
 volatile uint8_t q_count = 0;
 
-// Hàm thêm frame vào queue
+// Hàm thêm frame vào queue - Cải thiện memory safety
 bool enqueue_frame(uint8_t *data, uint8_t len) {
-  if (q_count >= MAX_QUEUE) return false; // đầy
+  // Validation đầu vào với flow control
+  if (q_count >= MAX_QUEUE) {
+    LOG_ERROR(LOG_CAT_QUEUE, "Queue full - frame dropped");
+    return false;
+  }
+  
+  // Send flow control signal: GO (if queue was nearly full)
+  if (q_count >= MAX_QUEUE * 0.8) {
+    LOG_WARN(LOG_CAT_QUEUE, "Queue nearly full - sending flow control signal");
+  }
+  
+  if (data == nullptr) {
+    LOG_ERROR(LOG_CAT_QUEUE, "Invalid data pointer");
+    return false;
+  }
+  
+  if (len == 0 || len > KNX_BUFFER_MAX_SIZE) {
+    LOG_ERROR(LOG_CAT_QUEUE, "Invalid frame length: %d", len);
+    return false;
+  }
+  
+  // Copy an toàn với bounds checking
   memcpy(queue[q_tail].data, data, len);
   queue[q_tail].len = len;
+  
+  // Clear phần còn lại của buffer để tránh data leakage
+  if (len < KNX_BUFFER_MAX_SIZE) {
+    memset(queue[q_tail].data + len, 0, KNX_BUFFER_MAX_SIZE - len);
+  }
+  
   q_tail = (q_tail + 1) % MAX_QUEUE;
   q_count++;
   return true;
@@ -185,30 +322,23 @@ bool dequeue_frame(Frame *f) {
 
 
 void setup() {
-   DEBUG_SERIAL.begin(19200, SERIAL_8E1); // parity even
-   Serial3.begin(19200,SERIAL_8E1);
-   IWatchdog.begin(500000);
-   knx_rx_init(handle_knx_frame);
-   knx_tx_init();
-   MX_NVIC_Init();
-   Serial3.printf("Start\r\n");
+   system_init();
+   logger_init();
+   LOG_INFO(LOG_CAT_SYSTEM, "KNX Gateway started - Logger initialized");
 }
 
 // Loop-----------------------------------------------------------------
 void loop() {
   #if KNX_RX_MODE
-  if(knx_rx_flag) {
-    knx_rx_flag = false;
+  if(get_knx_rx_flag_safe()) {
+    set_knx_rx_flag_safe(false);
     //Serial3.printf("Serial OK after KNX receiver\r\n");
-    DEBUG_SERIAL.write(knx_rx_buf, knx_rx_length);
-  }
-  if(micros()-last_byte_time>1500){
-    knx_is_receved = false;
+    HC_SERIAL.write(knx_rx_buf, knx_rx_length);
   }
 #else
-  if(knx_rx_flag) {
-    knx_rx_flag = false;
-    DEBUG_SERIAL.write(Rx_byte); // Gửi byte nhận được qua Serial để kiểm tra
+  if(get_knx_rx_flag_safe()) {
+    set_knx_rx_flag_safe(false);
+    HC_SERIAL.write(Rx_byte); // Gửi byte nhận được qua Serial để kiểm tra
   }
 #endif
   // Nhận frame từ UART → bỏ vào queue
@@ -221,7 +351,8 @@ void loop() {
   // Nếu KNX đang rảnh → lấy frame từ queue ra gửi
 
 
-if (q_count > 0) {
+if (ATOMIC_QUEUE_READ_COUNT() > 0) {
+  // Double-check bus status trước khi gửi
   if (!get_knx_rx_flag()) {
     if (!waiting_backoff) {
       // Bắt đầu backoff ngẫu nhiên
@@ -229,14 +360,37 @@ if (q_count > 0) {
       waiting_backoff = true; 
     }
     else if (millis() >= backoff_time) {
-      // Backoff xong, gửi frame
-      Frame f;
-      if (dequeue_frame(&f)) {
-        for(int i=0; i<f.len; i++){
-          Serial3.printf("%02X ", f.data[i]);
+      // Final check trước khi gửi
+      if (!get_knx_rx_flag()) {
+        // Backoff xong, gửi frame
+        Frame f;
+        if (dequeue_frame(&f)) {
+          for(int i=0; i<f.len; i++){
+            LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
+          }
+          
+          knx_error_t result = knx_send_frame(f.data, f.len);
+          if (result == KNX_OK) {
+            // Gửi thành công - lưu frame để chờ echo ACK
+            memcpy(pending_frame.data, f.data, f.len);
+            pending_frame.len = f.len;
+            pending_frame.send_time = millis();
+            pending_frame.retry_count = 0;
+            pending_frame.waiting_ack = true;
+            has_pending_frame = true;
+            
+            LOG_INFO(LOG_CAT_KNX_TX, "Frame sent - waiting for echo ACK");
+            LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
+          } else {
+            LOG_ERROR(LOG_CAT_KNX_TX, "Send failed: %s", knx_error_to_string(result));
+            LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Failed frame", f.data, f.len);
+            
+            // Gửi thất bại - thêm vào queue để retry
+            enqueue_frame(f.data, f.len);
+          }
         }
-        Serial3.println(); 
-        knx_send_frame(f.data, f.len);
+      } else {
+        LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
       }
       waiting_backoff = false;
     }
@@ -245,8 +399,43 @@ if (q_count > 0) {
     waiting_backoff = false;
   }
   }
-    //Reload watchdog timer
-  IWatchdog.reload();
+  
+  // Check echo ACK timeout và retry
+  if (has_pending_frame && pending_frame.waiting_ack) {
+    uint32_t now = millis();
+    uint32_t timeout = 100; // 100ms timeout cho echo ACK
+    
+    if (now - pending_frame.send_time > timeout) {
+      // Echo ACK timeout - cần retry
+      pending_frame.retry_count++;
+      
+      if (pending_frame.retry_count < 3) {
+        LOG_WARN(LOG_CAT_ECHO_ACK, "Echo ACK timeout - retrying (attempt %d)", 
+                pending_frame.retry_count);
+        
+        // Retry gửi frame
+        knx_error_t result = knx_send_frame(pending_frame.data, pending_frame.len);
+        if (result == KNX_OK) {
+          pending_frame.send_time = now; // Reset timeout
+          LOG_INFO(LOG_CAT_ECHO_ACK, "Retry frame sent - waiting for echo ACK");
+        } else {
+          LOG_ERROR(LOG_CAT_ECHO_ACK, "Retry send failed: %s", knx_error_to_string(result));
+          // Gửi thất bại - thêm vào queue
+          enqueue_frame(pending_frame.data, pending_frame.len);
+          has_pending_frame = false;
+        }
+      } else {
+        // Max retries reached - drop frame
+        LOG_ERROR(LOG_CAT_ECHO_ACK, "Max echo ACK retries reached - dropping frame");
+        LOG_HEX_DEBUG(LOG_CAT_ECHO_ACK, "Dropped frame", pending_frame.data, pending_frame.len);
+        has_pending_frame = false;
+        pending_frame.waiting_ack = false;
+      }
+    }
+  }
+  
+  // System health check and watchdog reload
+  system_health_check();
 }
 
 

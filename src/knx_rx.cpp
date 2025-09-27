@@ -26,17 +26,29 @@ static volatile bool RX_flag=false;
 static uint8_t total = 0;
 
 bool get_knx_rx_flag(){
-  // Nếu lần thời gian nhận tín hiệu gần đây < 2ms thì trả về true, tức là BUS bận, còn không thì là bus rảnh
-  return (millis()-last_rx_time)<4;
+  // Kiểm tra multiple conditions để đảm bảo bus thực sự rảnh
+  uint32_t now = millis();
+  
+  // 1. Kiểm tra thời gian từ lần cuối có activity
+  if ((now - last_rx_time) < KNX_BUS_BUSY_TIMEOUT_MS) {
+    return true; // Bus bận
+  }
+  
+  // 2. Kiểm tra RX_flag (đang trong quá trình nhận)
+  if (RX_flag) {
+    return true; // Bus bận
+  }
+  
+  // 3. Kiểm tra timer có đang chạy không
+  if (timer.isRunning()) {
+    return true; // Bus bận
+  }
+  
+  return false; // Bus rảnh
 }
 
-static uint8_t knx_checksum(uint8_t *data, size_t len) {
-    uint8_t sum = 0;
-    for (size_t i = 0; i < len; i++) {
-        sum ^= data[i];  // XOR từng byte
-    }
-    return sum;
-}
+// Sử dụng cùng hàm checksum với main.cpp để đảm bảo consistency
+extern uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 void knx_rx_init(knx_frame_callback_t cb) {
   timer.setPrescaleFactor((SystemCoreClock/1000000) -1);   // CK_CNT = 8MHz / (8+1) = 1MHz
   timer.setOverflow(104);       
@@ -54,9 +66,10 @@ void knx_rx_init(knx_frame_callback_t cb) {
 
 
 void knx_exti_irq(void) {
-  //last_rx_time = millis();
+  // Cập nhật last_rx_time ngay khi có bất kỳ thay đổi nào trên bus
+  last_rx_time = millis();
+  
   if(!RX_flag){
-
       RX_flag = true;
       timer.refresh();
       timer.resume(); // Bật lại timer để bắt đầu nhận dữ liệu
@@ -74,7 +87,7 @@ void knx_exti_irq(void) {
     uint8_t w = now >= pulse_start ? now - pulse_start :104-pulse_start + now;
     if (w >= BIT0_MIN_US && w <= BIT0_MAX_US){
          bit0 = true;
-         last_rx_time = millis();  //settime để  get_knx_rx_flag
+         // last_rx_time đã được cập nhật ở đầu hàm
     }   
   }
   last = lvl;
@@ -90,51 +103,6 @@ void reset_knx_receiver() {
   bit0 = false;
   RX_flag= false;
 }
-#if KNX_SEND_UART_MODE
-void knx_timer_tick(void) {
-  uint8_t bit = bit0 ? 0 : 1;
-  bit0 = false;
-  bit_idx++;
-  if (bit_idx == 1) {
-    cur_byte = 0;
-    parity_bit = 0;
-  } 
-  else if (bit_idx >= 2 && bit_idx <= 9) {
-    cur_byte >>= 1;
-    if (bit) {
-      cur_byte |= 0x80;
-      parity_bit++;
-    }
-  } 
-    else if (bit_idx == 10) {
-    if ((parity_bit & 1) == bit) {
-      return;
-    }
-  } 
-  if (bit_idx == 11 && bit == 1) {
-    received_frame[byte_idx] = cur_byte;
-    //if (callback_fn) callback_fn(cur_byte);
-    cur_byte = 0;
-    bit_idx = 0;
-    byte_idx++;
-    timer.pause();
-    RX_flag = false;
-  }
-  if (byte_idx >= 6 && total == 0) {
-    total = 6 + (received_frame[5] & 0x0F) + 1 + 1;
-    if (total> KNX_MAX_FRAME_LEN) {
-      reset_knx_receiver();
-      return;
-    }
-  }
-      if (total > 0 && byte_idx == total) {
-      detachInterrupt(digitalPinToInterrupt(KNX_TX_PIN));
-      if (callback_fn) callback_fn((const uint8_t*) received_frame, total);
-      reset_knx_receiver();
-      return;
-    }
-}
-#else
 void knx_timer_tick(void) {
   uint8_t bit = bit0 ? 0 : 1;
   bit0 = false;
@@ -164,5 +132,4 @@ void knx_timer_tick(void) {
     timer.pause();
   }
 }
-#endif
 #endif
