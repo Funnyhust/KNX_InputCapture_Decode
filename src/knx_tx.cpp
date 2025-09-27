@@ -45,8 +45,9 @@ static void encode_byte(uint8_t b) {
     // parity even
     encode_bit(parity_count & 1);
   //  encode_bit(1);    // stop = 1
-
-  
+    encode_bit(1);
+    encode_bit(1);
+    encode_bit(1);
 }
 // ===== Prepare frame =====
 static void prepare_frame(uint8_t *data, int len) {
