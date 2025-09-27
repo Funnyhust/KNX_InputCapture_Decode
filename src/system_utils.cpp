@@ -33,7 +33,7 @@ void system_init(void) {
     HC_SERIAL.begin(UART_BAUD_RATE, SERIAL_8E1);
     
     // Initialize watchdog
-    IWatchdog.begin(WATCHDOG_TIMEOUT_US);
+    //  IWatchdog.begin(WATCHDOG_TIMEOUT_US);
     
     // Initialize KNX modules
     knx_rx_init(handle_knx_frame);
@@ -64,7 +64,7 @@ bool system_health_check(void) {
     uint32_t now = millis();
     
     // Check every 5 seconds
-    if (now - last_check > 5000) {
+    if (now - last_check > 200) {
         last_check = now;
         
         // Check if watchdog is working
@@ -76,7 +76,7 @@ bool system_health_check(void) {
             return false;
         }
         
-        LOG_INFO(LOG_CAT_SYSTEM, "System health OK");
+       // LOG_INFO(LOG_CAT_SYSTEM, "System health OK");
     }
     
     return true;

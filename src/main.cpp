@@ -11,6 +11,8 @@
 
 #define KNX_BUFFER_MAX_SIZE 23
 
+uint16_t send_done_count=0;
+
 // Forward declarations
 uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 
@@ -19,10 +21,10 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 
 // Cải thiện random function để tránh integer overflow
 static uint64_t seed = 1;
-uint8_t random_2_to_10(void) {
+uint8_t random_num(uint8_t a, uint8_t b) {
     // Sử dụng uint64_t để tránh overflow
     seed = (seed * 1664525ULL + 1013904223ULL) & 0xFFFFFFFFULL;
-    return (seed % 9) + 2;  // [2..10] - sửa lỗi logic
+    return (seed % (b-a) + 1) + a;  // [2..10] - sửa lỗi logic
 }
 
 
@@ -119,7 +121,6 @@ bool read_uart_frame() {
   };
   
   static PendingFrame pending_frame;
-  static bool has_pending_frame = false; 
 
 //KNX-RX ========================================================================================================================================
 static uint8_t knx_rx_buf[KNX_BUFFER_MAX_SIZE];
@@ -158,16 +159,16 @@ bool compare_frames(const uint8_t *frame1, uint8_t len1, const uint8_t *frame2, 
 
 //===============Echo ACK Handler=================
 void handle_echo_ack(const uint8_t *rx_frame, uint8_t rx_len) {
-  if (!has_pending_frame || !pending_frame.waiting_ack) {
+  if (!pending_frame.waiting_ack) {
     return; // Không có frame đang chờ ACK
   }
   
   // So sánh frame nhận được với frame đã gửi
   if (compare_frames(pending_frame.data, pending_frame.len, rx_frame, rx_len)) {
     // Echo ACK thành công!
-    LOG_INFO(LOG_CAT_ECHO_ACK, "Echo ACK received - transmission successful");
-    LOG_HEX_DEBUG(LOG_CAT_ECHO_ACK, "Echo ACK frame", rx_frame, rx_len);
-    has_pending_frame = false;
+    //LOG_INFO(LOG_CAT_ECHO_ACK, "Echo ACK received - transmission successful");
+    //LOG_HEX_DEBUG(LOG_CAT_ECHO_ACK, "Echo ACK frame", rx_frame, rx_len);
+    send_done_count++;
     pending_frame.waiting_ack = false;
   }
 }
@@ -229,7 +230,6 @@ void handle_knx_frame(const uint8_t byte) {
       if (validation == FRAME_VALID) {
         // Check if this is an echo ACK của frame đã gửi
         handle_echo_ack(knx_rx_buf, knx_rx_length);
-        
         set_knx_rx_flag_safe(true);
       } else {
         // LOG_ERROR(LOG_CAT_VALIDATION, "KNX Frame validation failed: %s", 
@@ -346,48 +346,51 @@ void loop() {
     //Serial3.printf("Serial OK after UART receiver\r\n");
     enqueue_frame(uart_rx_buf, Uart_length);
     Uart_length = 0;
-
   }
   // Nếu KNX đang rảnh → lấy frame từ queue ra gửi
 
 
-if (ATOMIC_QUEUE_READ_COUNT() > 0) {
+if (ATOMIC_QUEUE_READ_COUNT() > 0 && !pending_frame.waiting_ack) {
   // Double-check bus status trước khi gửi
   if (!get_knx_rx_flag()) {
     if (!waiting_backoff) {
       // Bắt đầu backoff ngẫu nhiên
-      backoff_time = millis() + random_2_to_10();// 2-10ms
-      waiting_backoff = true; 
+      backoff_time = millis() + random_num(5,10);// 2-10ms
+      waiting_backoff = true;
     }
     else if (millis() >= backoff_time) {
       // Final check trước khi gửi
       if (!get_knx_rx_flag()) {
         // Backoff xong, gửi frame
         Frame f;
+        LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Start dequeue", nullptr, 0);
+
         if (dequeue_frame(&f)) {
-          for(int i=0; i<f.len; i++){
+          // for(int i=0; i<f.len; i++){
             LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
-          }
+          // }
           
           knx_error_t result = knx_send_frame(f.data, f.len);
-          if (result == KNX_OK) {
+          LOG_DEBUG(LOG_CAT_KNX_TX, "knx_send_frame done, %d", result);
+
+          // if (result == KNX_OK) {
             // Gửi thành công - lưu frame để chờ echo ACK
             memcpy(pending_frame.data, f.data, f.len);
             pending_frame.len = f.len;
             pending_frame.send_time = millis();
             pending_frame.retry_count = 0;
             pending_frame.waiting_ack = true;
-            has_pending_frame = true;
             
-            LOG_INFO(LOG_CAT_KNX_TX, "Frame sent - waiting for echo ACK");
-            LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
-          } else {
-            LOG_ERROR(LOG_CAT_KNX_TX, "Send failed: %s", knx_error_to_string(result));
-            LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Failed frame", f.data, f.len);
+        //   //  LOG_INFO(LOG_CAT_KNX_TX, "Frame sent - waiting for echo ACK");
+        //     LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
+        //   } 
+        //   else {
+        //     LOG_ERROR(LOG_CAT_KNX_TX, "Send failed: %s", knx_error_to_string(result));
+        //     LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Failed frame", f.data, f.len);
             
-            // Gửi thất bại - thêm vào queue để retry
-            enqueue_frame(f.data, f.len);
-          }
+        //     // Gửi thất bại - thêm vào queue để retry
+        //     enqueue_frame(f.data, f.len);
+        //   }
         }
       } else {
         LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
@@ -401,9 +404,9 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0) {
   }
   
   // Check echo ACK timeout và retry
-  if (has_pending_frame && pending_frame.waiting_ack) {
+  if (pending_frame.waiting_ack) {
     uint32_t now = millis();
-    uint32_t timeout = 100; // 100ms timeout cho echo ACK
+    uint32_t timeout = 7; // 100ms timeout cho echo ACK
     
     if (now - pending_frame.send_time > timeout) {
       // Echo ACK timeout - cần retry
@@ -417,24 +420,27 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0) {
         knx_error_t result = knx_send_frame(pending_frame.data, pending_frame.len);
         if (result == KNX_OK) {
           pending_frame.send_time = now; // Reset timeout
-          LOG_INFO(LOG_CAT_ECHO_ACK, "Retry frame sent - waiting for echo ACK");
+        //  LOG_INFO(LOG_CAT_ECHO_ACK, "Retry frame sent - waiting for echo ACK");
         } else {
           LOG_ERROR(LOG_CAT_ECHO_ACK, "Retry send failed: %s", knx_error_to_string(result));
           // Gửi thất bại - thêm vào queue
-          enqueue_frame(pending_frame.data, pending_frame.len);
-          has_pending_frame = false;
+          //enqueue_frame(pending_frame.data, pending_frame.len);
         }
       } else {
         // Max retries reached - drop frame
         LOG_ERROR(LOG_CAT_ECHO_ACK, "Max echo ACK retries reached - dropping frame");
         LOG_HEX_DEBUG(LOG_CAT_ECHO_ACK, "Dropped frame", pending_frame.data, pending_frame.len);
-        has_pending_frame = false;
         pending_frame.waiting_ack = false;
       }
     }
   }
-  
   // System health check and watchdog reload
+  // Debug send done count mỗi 2 giây
+  static uint32_t last_debug_time = 0;
+  if (millis() - last_debug_time >= 500) {
+    last_debug_time = millis();
+    LOG_INFO(LOG_CAT_KNX_TX, "%u", send_done_count);
+  }
   system_health_check();
 }
 

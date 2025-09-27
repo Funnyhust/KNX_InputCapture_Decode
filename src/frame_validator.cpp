@@ -10,7 +10,7 @@ frame_validation_result_t validate_knx_frame(const uint8_t *data, uint8_t len) {
     // Extract frame components
     uint8_t control = data[0];
     uint8_t data_length = data[5] & 0x0F;
-    uint8_t expected_length = 6 + data_length + 1; // header + data + checksum
+    uint8_t expected_length = 6 + data_length + 1 + 1 ; // header + data + checksum
     
     // Validate total length
     if (len != expected_length) {
@@ -29,7 +29,7 @@ frame_validation_result_t validate_knx_frame(const uint8_t *data, uint8_t len) {
     
     // Validate checksum
     extern uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
-    if (data[len-1] != knx_calc_checksum(data, len-1)) {
+    if (data[len-1] != knx_calc_checksum(data, len)) {
         return FRAME_ERROR_CHECKSUM;
     }
     

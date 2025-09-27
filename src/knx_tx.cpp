@@ -1,9 +1,10 @@
 
 
 #include "knx_tx.h"
+#include "knx_rx.h"
 #include "config.h"
 #include <string.h> // For memset
-
+#include "logger.h"
 extern "C" {
   #include "stm32f1xx_hal.h"
 }
@@ -63,46 +64,48 @@ static void prepare_frame(uint8_t *data, int len) {
 knx_error_t knx_send_frame(uint8_t *data, int len) {
     // Input validation
     if (data == nullptr) {
-        DEBUG_SERIAL.println("KNX TX: Invalid data pointer");
+        LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Invalid data pointer");
         return KNX_ERROR_INVALID_PARAM;
     }
     
     if (len <= 0 || len > KNX_BUFFER_MAX_SIZE) {
-        DEBUG_SERIAL.printf("KNX TX: Invalid length %d\n", len);
+        LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Invalid length %d\n", len);
         return KNX_ERROR_INVALID_LENGTH;
     }
     
     // Kiểm tra DMA state
     if (hdma_tim1_ch3.State != HAL_DMA_STATE_READY) {
-        DEBUG_SERIAL.println("KNX TX: DMA busy");
+        LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: DMA busy");
         return KNX_ERROR_BUS_BUSY;
     }
     
     // Final bus collision check - đọc trực tiếp GPIO
-    uint8_t bus_level = (GPIOA->IDR & (1 << 9)) ? 1 : 0;
-    if (bus_level == 0) {
-        DEBUG_SERIAL.println("KNX TX: Bus collision detected - aborting");
-        return KNX_ERROR_BUS_BUSY;
-    }
-    
     prepare_frame(data, len);
-    
-    // Đợi Timer dừng hoàn toàn
-    uint32_t timeout = millis() + 10; // 10ms timeout
-    while (htim1.State != HAL_TIM_STATE_READY && millis() < timeout) {
-        delay(1);
+    uint8_t bus_level = get_knx_rx_flag();
+    if (bus_level) {
+        // Kiểm tra tín hiệu trên chân RX
+        uint8_t rx_pin_level = (GPIOA->IDR & (1 << 9)) ? 1 : 0; // Giả sử chân RX là PA9
+        if(rx_pin_level){ // Nếu chân RX vẫn cao thì bus vẫn bận
+            LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Bus collision detected - aborting");
+            return KNX_ERROR_BUS_BUSY;
+        }
     }
+    // // Đợi Timer dừng hoàn toàn
+    // uint32_t timeout = millis() + 10; // 10ms timeout
+    // while (htim1.State != HAL_TIM_STATE_READY && millis() < timeout) {
+    //     delay(1);
+    //     LOG_DEBUG(LOG_CAT_SYSTEM, "Wait for Timer ready...");
+    // }
     
-    if (htim1.State != HAL_TIM_STATE_READY) {
-        DEBUG_SERIAL.println("KNX TX: Timer not ready");
-        return KNX_ERROR_BUS_BUSY;
-    }
-    
+    // if (htim1.State != HAL_TIM_STATE_READY) {
+    //     LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Timer not ready");
+    //     return KNX_ERROR_BUS_BUSY;
+    // }
     // Start DMA transmission
     HAL_StatusTypeDef status = HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
     
     if (status != HAL_OK) {
-        DEBUG_SERIAL.printf("KNX TX: DMA start failed %d\n", status);
+        LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: DMA start failed %d\n", status);
         return KNX_ERROR_BUS_BUSY;
     }
     

@@ -24,7 +24,7 @@ extern HardwareSerial HC_SERIAL;
 #define KNX_MAX_FRAME_LEN 23
 
 // UART Configuration
-#define UART_BAUD_RATE 19200
+#define UART_BAUD_RATE 115200
 #define UART_TIMEOUT_MS 100
 
 // Watchdog Configuration

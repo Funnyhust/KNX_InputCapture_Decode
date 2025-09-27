@@ -5,7 +5,7 @@
 
 // Logger state
 static logger_config_t logger_config = {
-    .level = LOG_LEVEL_INFO,
+    .level = LOGGER_DEFAULT_LEVEL,
     .enable_timestamp = true,
     .enable_category = true,
     .enable_level = true,
