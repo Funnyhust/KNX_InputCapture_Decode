@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include "config.h"
 #include "knx_tx.h"
@@ -17,7 +16,11 @@ uint16_t send_done_count=0;
 uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 
 
+uint8_t test_frame[23] = {0xBC, 0xE0, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+uint8_t test_frame_len = 23;
+void send_test_frame() {
 
+}
 
 // Cải thiện random function để tránh integer overflow
 static uint64_t seed = 1;
@@ -235,7 +238,6 @@ void handle_knx_frame(const uint8_t byte) {
         // LOG_ERROR(LOG_CAT_VALIDATION, "KNX Frame validation failed: %s", 
         //          frame_validation_error_to_string(validation));
         // LOG_HEX_DEBUG(LOG_CAT_KNX_RX, "Invalid KNX frame", knx_rx_buf, knx_rx_length);
-      
         // Reset buffer sau khi báo lỗi
         ATOMIC_BLOCK_START();
         knx_rx_length = 0;
@@ -380,17 +382,6 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0 && !pending_frame.waiting_ack) {
             pending_frame.send_time = millis();
             pending_frame.retry_count = 0;
             pending_frame.waiting_ack = true;
-            
-        //   //  LOG_INFO(LOG_CAT_KNX_TX, "Frame sent - waiting for echo ACK");
-        //     LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Sent frame", f.data, f.len);
-        //   } 
-        //   else {
-        //     LOG_ERROR(LOG_CAT_KNX_TX, "Send failed: %s", knx_error_to_string(result));
-        //     LOG_HEX_DEBUG(LOG_CAT_KNX_TX, "Failed frame", f.data, f.len);
-            
-        //     // Gửi thất bại - thêm vào queue để retry
-        //     enqueue_frame(f.data, f.len);
-        //   }
         }
       } else {
         LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
@@ -410,21 +401,27 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0 && !pending_frame.waiting_ack) {
     
     if (now - pending_frame.send_time > timeout) {
       // Echo ACK timeout - cần retry
-      pending_frame.retry_count++;
       
       if (pending_frame.retry_count < 3) {
-        LOG_WARN(LOG_CAT_ECHO_ACK, "Echo ACK timeout - retrying (attempt %d)", 
-                pending_frame.retry_count);
-        
-        // Retry gửi frame
-        knx_error_t result = knx_send_frame(pending_frame.data, pending_frame.len);
-        if (result == KNX_OK) {
-          pending_frame.send_time = now; // Reset timeout
-        //  LOG_INFO(LOG_CAT_ECHO_ACK, "Retry frame sent - waiting for echo ACK");
+        if (!get_knx_rx_flag()) {
+           if (!waiting_backoff) {
+      // Bắt đầu backoff ngẫu nhiên
+            backoff_time = millis() + random_num(5,10);// 2-10ms
+            waiting_backoff = true;
+          }
+          else if (millis() >= backoff_time) {
+            // Final check trước khi gửi
+            if (!get_knx_rx_flag()) {
+                pending_frame.retry_count++;
+                knx_send_frame(pending_frame.data, pending_frame.len);
+            } else {
+              LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
+            }
+            waiting_backoff = false;
+          }
         } else {
-          LOG_ERROR(LOG_CAT_ECHO_ACK, "Retry send failed: %s", knx_error_to_string(result));
-          // Gửi thất bại - thêm vào queue
-          //enqueue_frame(pending_frame.data, pending_frame.len);
+          // Nếu bus bận trong lúc chờ → reset backoff
+          waiting_backoff = false;
         }
       } else {
         // Max retries reached - drop frame
@@ -442,9 +439,29 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0 && !pending_frame.waiting_ack) {
     LOG_INFO(LOG_CAT_KNX_TX, "%u", send_done_count);
   }
   system_health_check();
+  // send_test_frame();
+  // if (!get_knx_rx_flag()) {
+  //       if (!waiting_backoff) {
+  //     // Bắt đầu backoff ngẫu nhiên
+  //           backoff_time = millis() + random_num(5,10);// 2-10ms
+  //           waiting_backoff = true;
+  //         }
+  //         else if (millis() >= backoff_time) {
+  //           // Final check trước khi gửi
+  //           if (!get_knx_rx_flag()) {
+  //               knx_send_frame(test_frame, test_frame_len);
+  //           } else {
+  //             LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
+  //           }
+  //           waiting_backoff = false;
+  //         }
+  //       } else {
+  //         // Nếu bus bận trong lúc chờ → reset backoff
+  //         waiting_backoff = false;
+  //      }
+  //      delay(40);
+  // system_health_check();
 }
-
-
 
 
 
