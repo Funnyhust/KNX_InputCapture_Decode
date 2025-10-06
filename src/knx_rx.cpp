@@ -76,9 +76,9 @@ void knx_exti_irq(void) {
   }
   static uint8_t last = 0;
 
-// Đọc mức logic tại PA9
-  uint8_t lvl = (GPIOA->IDR & (1 << 9)) ? 1 : 0;
-  //bước 1: Nếu là sườn lên -> lưu lại time điểm này bằng bộ đếm timer
+// Đọc mức logic tại PB6
+  uint8_t lvl = (GPIOB->IDR & (1 << 6)) ? 1 : 0;
+   //bước 1: Nếu là sườn lên -> lưu lại time điểm này bằng bộ đếm timer
   //Bước 2: sườn xuống -> tính khoảng thời gian từ lúc sườn lên đến sườn xuống và kiểm tra khoảng time thỏa mãn ko? Nếu có thì bit 0/1
   //bước 3: 
   uint8_t now = timer.getCount();

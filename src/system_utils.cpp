@@ -18,8 +18,8 @@ void MX_NVIC_Init(void) {
     HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
     // Ưu tiên trung bình cho USART1
-    HAL_NVIC_SetPriority(USART2_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(USART2_IRQn);
+    HAL_NVIC_SetPriority(USART1_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
 
     // Ưu tiên thấp nhất cho USART2
     HAL_NVIC_SetPriority(USART3_IRQn, 2, 0);

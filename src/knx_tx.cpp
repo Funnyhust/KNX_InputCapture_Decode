@@ -9,8 +9,8 @@ extern "C" {
   #include "stm32f1xx_hal.h"
 }
 // handles được init trong knx_hal_conf.cpp
-extern TIM_HandleTypeDef htim1;
-extern DMA_HandleTypeDef hdma_tim1_ch3;
+extern TIM_HandleTypeDef htim3;
+extern DMA_HandleTypeDef hdma_tim3_ch3;
 
 // buffer DMA (halfword)
 static uint16_t dma_buf[269];
@@ -74,7 +74,7 @@ knx_error_t knx_send_frame(uint8_t *data, int len) {
     }
     
     // Kiểm tra DMA state
-    if (hdma_tim1_ch3.State != HAL_DMA_STATE_READY) {
+    if (hdma_tim3_ch3.State != HAL_DMA_STATE_READY) {
         LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: DMA busy");
         return KNX_ERROR_BUS_BUSY;
     }
@@ -84,7 +84,7 @@ knx_error_t knx_send_frame(uint8_t *data, int len) {
     uint8_t bus_level = get_knx_rx_flag();
     if (bus_level) {
         // Kiểm tra tín hiệu trên chân RX
-        uint8_t rx_pin_level = (GPIOA->IDR & (1 << 9)) ? 1 : 0; // Giả sử chân RX là PA9
+        uint8_t rx_pin_level = (GPIOB->IDR & (1 << 6)) ? 1 : 0; // Giả sử chân RX là PA9
         if(rx_pin_level){ // Nếu chân RX vẫn cao thì bus vẫn bận
             LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Bus collision detected - aborting");
             return KNX_ERROR_BUS_BUSY;
@@ -92,17 +92,17 @@ knx_error_t knx_send_frame(uint8_t *data, int len) {
     }
     // // Đợi Timer dừng hoàn toàn
     // uint32_t timeout = millis() + 10; // 10ms timeout
-    // while (htim1.State != HAL_TIM_STATE_READY && millis() < timeout) {
+    // while (htim3.State != HAL_TIM_STATE_READY && millis() < timeout) {
     //     delay(1);
     //     LOG_DEBUG(LOG_CAT_SYSTEM, "Wait for Timer ready...");
     // }
     
-    // if (htim1.State != HAL_TIM_STATE_READY) {
+    // if (htim3.State != HAL_TIM_STATE_READY) {
     //     LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: Timer not ready");
     //     return KNX_ERROR_BUS_BUSY;
     // }
     // Start DMA transmission
-    HAL_StatusTypeDef status = HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
+    HAL_StatusTypeDef status = HAL_TIM_PWM_Start_DMA(&htim3, TIM_CHANNEL_3, (uint32_t*)dma_buf, dma_len);
     
     if (status != HAL_OK) {
         LOG_DEBUG(LOG_CAT_SYSTEM, "KNX TX: DMA start failed %d\n", status);
@@ -114,9 +114,9 @@ knx_error_t knx_send_frame(uint8_t *data, int len) {
 
 // ===== Callback khi DMA hoàn tất =====
 extern "C" void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
-    if (htim->Instance == TIM1 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
-        HAL_TIM_PWM_Stop_DMA(&htim1, TIM_CHANNEL_3);
-        //DEBUG_SERIAL.printf("PWM Finished, DMA State: %d\r\n", hdma_tim1_ch3.State);
+    if (htim->Instance == TIM3 && htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
+        HAL_TIM_PWM_Stop_DMA(&htim3, TIM_CHANNEL_3);
+        //DEBUG_SERIAL.printf("PWM Finished, DMA State: %d\r\n", hdma_tim3_ch3.State);
     }
 }
 

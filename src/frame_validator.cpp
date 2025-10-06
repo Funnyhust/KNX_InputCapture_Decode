@@ -31,6 +31,7 @@ frame_validation_result_t validate_knx_frame(const uint8_t *data, uint8_t len) {
     extern uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
     if (data[len-1] != knx_calc_checksum(data, len)) {
         return FRAME_ERROR_CHECKSUM;
+        // DEBUG_SERIAL.printf(" | Expected: %02X, Calculated: %02X
     }
     
     return FRAME_VALID;

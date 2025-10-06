@@ -8,7 +8,7 @@
 #include <HardwareTimer.h>
 #include <HardwareSerial.h>
 
-#define KNX_TX_PIN PA9
+#define KNX_TX_PIN PB6
 
 typedef void (*knx_frame_callback_t)(const uint8_t byte);
 

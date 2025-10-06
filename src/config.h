@@ -27,8 +27,8 @@ extern HardwareSerial HC_SERIAL;
 #define UART_BAUD_RATE 115200
 #define UART_TIMEOUT_MS 100
 
-// Watchdog Configuration
-#define WATCHDOG_TIMEOUT_US 500000
+// Watchdog Configuration 500000=500ms
+#define WATCHDOG_TIMEOUT_US 5000000
 
 // Error Recovery
 #define MAX_ERROR_RETRY_COUNT 5

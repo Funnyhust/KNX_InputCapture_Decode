@@ -18,8 +18,15 @@ uint8_t knx_calc_checksum(const uint8_t *data, uint8_t len);
 
 uint8_t test_frame[23] = {0xBC, 0xE0, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 uint8_t test_frame_len = 23;
+uint8_t on_frame[9] = {0xBC, 0x11, 0x01, 0x00, 0x01, 0xE1, 0x00, 0x81, 0x32};
+uint8_t on_frame_len = 9;
+uint8_t off_frame[9] = {0xBC, 0x11, 0x01, 0x00, 0x01, 0xE1, 0x00, 0x80, 0x33};
+uint8_t off_frame_len = 9;
 void send_test_frame() {
-
+  knx_send_frame(on_frame, on_frame_len);
+  delay(1000);
+  knx_send_frame(off_frame, off_frame_len);
+  delay(1000);
 }
 
 // Cải thiện random function để tránh integer overflow
@@ -33,7 +40,7 @@ uint8_t random_num(uint8_t a, uint8_t b) {
 
 //UART
 HardwareSerial DEBUG_SERIAL(USART3);
-HardwareSerial HC_SERIAL(USART2);
+HardwareSerial HC_SERIAL(USART1);
 
 static uint8_t Uart_length = 0;
 static uint8_t uart_rx_buf[KNX_BUFFER_MAX_SIZE];
@@ -88,6 +95,9 @@ bool read_uart_frame() {
       } else {
         LOG_ERROR(LOG_CAT_VALIDATION, "UART Frame validation failed: %s", 
                  frame_validation_error_to_string(validation));
+          for (uint8_t i = 0; i < 23; i++) {
+            LOG_INFO(LOG_CAT_UART, "%02X ", uart_rx_buf[i]);
+        }
         LOG_HEX_DEBUG(LOG_CAT_UART, "Invalid UART frame", uart_rx_buf, total);
         
         index = 0;
@@ -322,6 +332,10 @@ bool dequeue_frame(Frame *f) {
   return true;
 }
 
+void HC_test() {
+  HC_SERIAL.write(0xAB);
+  delay(100);
+}
 
 void setup() {
    system_init();
@@ -438,29 +452,32 @@ if (ATOMIC_QUEUE_READ_COUNT() > 0 && !pending_frame.waiting_ack) {
     last_debug_time = millis();
     LOG_INFO(LOG_CAT_KNX_TX, "%u", send_done_count);
   }
+  
   system_health_check();
-  // send_test_frame();
-  // if (!get_knx_rx_flag()) {
-  //       if (!waiting_backoff) {
-  //     // Bắt đầu backoff ngẫu nhiên
-  //           backoff_time = millis() + random_num(5,10);// 2-10ms
-  //           waiting_backoff = true;
-  //         }
-  //         else if (millis() >= backoff_time) {
-  //           // Final check trước khi gửi
-  //           if (!get_knx_rx_flag()) {
-  //               knx_send_frame(test_frame, test_frame_len);
-  //           } else {
-  //             LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
-  //           }
-  //           waiting_backoff = false;
-  //         }
-  //       } else {
-  //         // Nếu bus bận trong lúc chờ → reset backoff
-  //         waiting_backoff = false;
-  //      }
-  //      delay(40);
-  // system_health_check();
+  //HC_test();
+ // IWatchdog.reload();
+ //send_test_frame();
+  if (!get_knx_rx_flag()) {
+        if (!waiting_backoff) {
+      // Bắt đầu backoff ngẫu nhiên
+            backoff_time = millis() + random_num(5,10);// 2-10ms
+            waiting_backoff = true;
+          }
+          else if (millis() >= backoff_time) {
+            // Final check trước khi gửi
+            if (!get_knx_rx_flag()) {
+                knx_send_frame(test_frame, test_frame_len);
+            } else {
+              LOG_DEBUG(LOG_CAT_KNX_TX, "Bus became busy during backoff - retrying");
+            }
+            waiting_backoff = false;
+          }
+        } else {
+          // Nếu bus bận trong lúc chờ → reset backoff
+          waiting_backoff = false;
+       }
+       delay(90);
+  system_health_check();
 }
 
 
